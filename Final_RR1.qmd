@@ -1,0 +1,559 @@
+---
+title: "Final Report: Which Personality Quiz, Analysis of popularity throughout the years"
+format: 
+  html:
+    self_contained: true
+    toc: true
+    embed-resources: true
+execute:
+  echo: true
+  warning: false
+  message: false 
+  error: false
+editor: visual
+---
+
+## Introduction
+
+This paper performs a statistical analysis on open-source data collected through the Which Personality Quiz, an online personality-matching survey that associates participants with fictional characters from TV shows, movies, or popular franchises.
+
+### The survey:
+
+The survey unfolds in three main stages.
+
+-   **Participant personality:** First, participants answer questions about their personality using bipolar adjective scales ranging from 0 to 100. Participants slide the lever and stop at the percentage they feel fits their personality most. An example question is shown here:
+
+![](images/clipboard-947655878.png)
+
+The answers to these questions are encrypted into the variable quiz_items.
+
+-   **Universe selection and matching:** Then, participants are given a list of fictional universes (shows and movies) to select from.
+
+![](images/clipboard-3461495799.png){width="484"}
+
+Participants' selection of universes is encrypted into the variable universe_selected. Based on these responses (embodied in the quiz_items variable and universe_selected), an algorithm matches participants with a character from the fictional universes selected and assigns a percentage indicating a degree of similarity.
+
+-   **Rating section:** Participants may then evaluate the outcome of the matching by rating how similar they feel to the assigned character on a scale from 1 (“extremely similar”) to 6 (“extremely different”). This subjective evaluation (the variable survey_ratings) constitutes the main outcome variable in this study.
+
+There are many other variables of interest in this data set, however for this report, we choose to focus on three variables: universe_selected, survey_ratings and year.
+
+## Research Question:
+
+This Quiz is inspired by and highly resembles Buzzfeed quizzes. To gain traction and elicit positive responses from users, these quizzes rely heavily on popular franchises that ignite nostalgic feelings, like harry potter, the marvel universe and other widely known shows.
+
+In this report, we want to put to the test whether users objectively feel similar to characters from the shows they selected, or whether they are led to appreciate a similarity rating because of the popularity of a show.
+
+Highly popular fictional universes tend to be more culturally salient, widely referenced, and familiar to participants. This greater exposure may foster positive associations and stronger memory traces. As a result, being matched with a character from a popular universe may be perceived as more similar.
+
+In contrast, less popular or more niche universes, while they can still elicit emotional attachment for some participants, are generally less culturally present and may therefore generate weaker ratings.
+
+**How does this translate in our data?**
+
+As we've mentioned before, our three variables of interest are universe_selected (which shows participants selected most and least), survey_ratings (how similar participants feel to their result character) and year (the year in which participants took the test, this variable will become relevant a little later into the analysis).
+
+**Hypothesis 1:**
+
+We predict that on average, universes that are "popular" (selected more often than others) will benefit from better similarity ratings (ratings closer to 1 for maximum similarity, opposed to 6).
+
+## Tidying the data:
+
+```{r}
+#| include: false
+library(tidyverse)
+library(tidyr)
+library(dplyr)
+library(ggplot2)
+library(gt)
+library(jsonlite)
+library(purrr)
+library(kableExtra)
+library(knitr)
+data <- read_delim("SWCPQ-Identification-Survey-Dataset-July2022.csv")
+
+```
+
+The dataset contains 297,877 observations and 19 variables. Several variables are stored as numeric (`<dbl>`) despite being categorical (age group , gender and screen type). These variables will be recoded as factors. Other variables contain JSON-encoded structures (survey_ratings and quiz_items) and require further parsing and tidying before analysis.
+
+```{r}
+#Constructing a table (called variable_table) to calculate missing values and number of unique values 
+variable_table <- data %>%
+  summarise(across(
+    everything(), #selecting and summarizing info on all variables
+    list(
+      type = ~ class(.x)[1],
+      n_missing = ~ sum(is.na(.x)), #show n of missing values
+      n_unique = ~ n_distinct(.x)  #show n of unique values
+    ),
+    .names = "{.col}__{.fn}"
+  )) %>%
+  pivot_longer(
+    cols = everything(),
+    names_to = c("variable", ".value"),
+    names_sep = "__"
+  ) %>%
+  arrange(variable)
+
+variable_table %>% #creating a table summarizing this information
+  kable(
+    col.names = c("Variable", "Type", "Missing values", "Unique values"),
+    caption = "Overview of variables in the dataset"
+  ) %>%
+  kable_styling(
+    bootstrap_options = c("striped", "condensed"),
+    full_width = FALSE
+  )
+
+```
+
+Variables with substantial missing values (occupation, Jung type, country and region) will be removed from the main analysis to avoid faulty or unreliable conclusions. These variables aren't relevant to our analysis anyway, and thus no longer need to appear.
+
+```{r}
+#Let's create a new dataset (called data_clean), showing only relavant information for analysis. 
+
+#1. First removing non-reliable variables: 
+data_clean <- data %>%
+
+  select(
+    -occupation,
+    -jung_type,
+    -country,
+    -universes_unselected,
+    -introelapse,
+    -endelapse,
+    -region
+  ) %>%
+  
+# 2. Recoding coded numerics as factors 
+  mutate(
+    age_group = factor(age_group),
+    gender    = factor(gender),
+    engNat    = factor(engNat),
+    screen    = factor(screen),
+    
+#3 Encoding quantitative variables are numeric
+    year          = as.numeric(year),
+    testelapse    = as.numeric(testelapse),
+    surveyelapse  = as.numeric(surveyelapse),
+    form          = as.numeric(form),
+    enneagram_type= as.numeric(enneagram_type)
+  )
+
+```
+
+Our new dataset contains 12 variables instead of 19.
+
+Here we will focus on the nested variable survey_ratings in order to simplify analysis. The variable survey_ratings has 3 pieces of information (volumes) in one cell:
+
+1.  *character ID:* the character participants were matched with after responding
+
+2.  *user_rating*: Participants' rating of character matching which goes from 1= Extremely similar to 6= Extremely different. This can be perceived as participants' satisfaction with survey results.
+
+3.  *response time*: in milliseconds, how long did users take to rate the survey.
+
+    ```{r}
+    #Creating a rating block in the data_clean set. 
+    #First we need to add user id s in order to locate which participants gave which rating: 
+    data_clean <- data_clean %>%
+      mutate(user_id = row_number()) %>% #user_id is given by row number
+      relocate(user_id)
+
+    #There are too many observations, which slows down the tidying process: we selected a random sample of 10 000 from the original dataset, data_clean
+
+    set.seed(123) #this freezes the sample to make sure results dont change everytime code is ran
+
+    data_sample <- data_clean %>% 
+      slice_sample(n= 10000)
+
+
+    #Lets now seperate the three objects nested withing json_parsed (survey_rating list) into three usable variables
+
+    data_sample_tidy <- data_sample %>%
+      mutate(parsed = map(survey_ratings, fromJSON)) %>% #seperating volumes
+      mutate(parsed = map(parsed, as.data.frame)) %>% #each volum as a column
+      unnest(parsed) %>%
+      rename(
+        chr_id = V1,           # renaming each volume of the parsed list as their variable names.
+        user_rating = V2,
+        response_time = V3
+      ) %>%
+      mutate(
+        user_rating = as.numeric(user_rating),   #user_rating is a numeric variable
+        response_time = as.numeric(response_time) #same for response_time
+      ) %>%
+      select(-survey_ratings)
+
+    #Now the section survey_ratings is transformed into three distinct variables each analysable independently. 
+    summary(data_sample_tidy$user_rating) #measures of central tendency 
+    kable(t(summary(data_sample_tidy$user_rating)),
+          caption = "Measures of central tendency: survey ratings") %>%
+      kable_styling(full_width = FALSE)
+    ```
+
+Mean rating is ≃ 4 meaning that on average, participants found characters to be slightly different from themselves.
+
+Having organised the major part of the data set of interest, we can now proceed with the visualization of distribution of key variables.
+
+## Descriptive statistics:
+
+### Hypothesis 1: Popular shows get better similarity ratings
+
+##### Which universes do participants select the most ?
+
+The variable universe_selected represents the list of fictional universes participants chose. Characters of these selected universes alone are matched with participants.
+
+```{r}
+#Universe_selected has multiple universes per row, lets split them:
+universe_long <- data_sample_tidy %>%
+  select(user_id, universes_selected) %>% 
+  separate_rows(universes_selected, sep = ",") #seperating each universe selected by a participant to become an individual row rather than seperated by ","
+
+#Now counting how many participants per universe
+universe_counts <- universe_long %>%
+  distinct(user_id, universes_selected) %>%  #making sure each participant's selection is counted 
+  count(universes_selected, name = "n_participants") %>%
+  arrange(desc(n_participants)) #decreasing order 
+```
+
+Lets first see the distribution of universes across participants:
+
+```{r}
+#Let's plot this new data frame to show the distribution of shows across participants.
+ggplot(universe_counts,
+       aes(x = reorder(universes_selected, n_participants), #starting from least to most picked)
+           y = n_participants)) +
+  geom_col() +
+  coord_flip() +
+  labs(
+    x = "Fictional universe",
+    y = "Number of participants",
+    title = "Distribution of universe selection across participants"
+  ) +
+  theme_minimal()
+
+```
+
+Participants have a large list of universes to pick from. The actual name of shows matters little here. The distribution of universes across participants is highly skewed. Most universes are selected by a relatively small number of participants. There is a high concentration of participants around a handful of very popular shows.
+
+To operationnalize popularity as a category, we will introduce a median split separating higher than median selection as "popular" and lower than median as "unpopular".
+
+Lets introduce a median split:
+
+```{r}
+#Introducing a median split of number of selection across universes, which we'll call median_selection.
+median_selection <- median(universe_counts$n_participants)
+median_selection
+```
+
+Our analysis categorizes universes by popularity, which here we compute by *frequency of selection*. We calculate the median of selection , which amounts to `{r} median_selection`\`. The median tells us that half of the available fictional universes were selected by fewer than 49 participants, and the other half is selected by more than 49 participants. This is the criteria we set to differentiate between popular and unpopular universes.
+
+This median split allows us to both include all universes in our analysis and compare the mean ratings among two groups of different popularity levels. Lets classify the universes based on this criteria:
+
+```{r}
+#Building distinct groups by introducing the median split as a criteria. 
+universe_counts <- universe_counts %>%
+  mutate(
+    popularity_group = if_else( #condition of median
+      n_participants > median_selection,
+      "Popular",
+      "Unpopular" 
+    )
+  ) 
+```
+
+##### How do ratings differ by popularity ?
+
+Now we want to see how each group performs on rating. Meaning, how similar do participants feel to the character they were matched with from a popular versus unpopular universe.
+
+Reminder: The variable user rating is a Likert scale from 1 to 6, 1 being extremely similar and 6 extremely different. So here, the higher the rating, the less satisfied participants are with their matching.
+
+```{r}
+#dataframe that associates each universe with its rating 
+ratings_by_universe <- data_sample_tidy %>% #extracting from original dataset
+  select(user_id, chr_id, user_rating) %>%
+  separate(chr_id, into = c("universe", "character_id"), sep = "/", remove = FALSE) %>%
+  mutate(user_rating = as.numeric(user_rating)) #this allows us to work with means
+
+#Now we show ratings by popularity of universes (bringing the criteria in the dataframe): 
+ratings_with_popularity <- ratings_by_universe %>% 
+  left_join(
+    universe_counts %>% 
+      select(universes_selected, popularity_group), #each universe is given its criteria depending on its rating
+    by = c("universe" = "universes_selected")
+  )
+
+#Now calculating the mean, median and standard deviation of ratings by popularity
+ratings_with_popularity %>%
+  group_by(popularity_group) %>%
+  summarise(
+    n_ratings    = n(),
+    mean_rating = mean(user_rating, na.rm = TRUE),
+    median_rating = median(user_rating, na.rm = TRUE),
+    sd_rating   = sd(user_rating, na.rm = TRUE)
+  ) %>%
+  mutate(
+    mean_rating = round(mean_rating, 2),
+    sd_rating   = round(sd_rating, 2)
+  ) %>%
+  kable(
+    col.names = c(
+      "Universe popularity",
+      "Number of ratings",
+      "Mean rating",
+      "Median rating",
+      "Standard deviation"
+    ),
+    caption = "Descriptive statistics of user ratings by universe popularity"
+  ) %>%
+  kable_styling(
+    bootstrap_options = c("striped", "condensed"),
+    full_width = FALSE
+  )
+```
+
+The mean ratings of popular versus unpopular shows is almost identical, with a difference of 0.06. Surprisingly, unpopular universes benefit from a silghtly lower rating on average, contradicting our initial prediction. Popular and unpopular universe groups seem to be associated with, on average, highly similar ratings. Lets visualize this with a box plot.
+
+```{r}
+#visualization of ratings by popularity: 
+
+ggplot(
+  ratings_with_popularity,
+  aes(x = popularity_group, y = user_rating)
+) +
+  geom_boxplot() +
+  labs(
+    title = "Distribution of character ratings by universe popularity",
+    x = "Universe popularity (median split)",
+    y = "User rating (1 = extremely similar, 6 = extremely different)"
+  ) +
+  theme_minimal()
+
+```
+
+Indeed, as shown in this plot, popularity does not seem to be significantly associated with a change in rating. Although the range of ratings is higher in popular groups (which is expected), the means and standard deviations of the popularity categories are identical. Let's run a t-test to see if this is statistically sound.
+
+##### Statistical test for this association (or lack thereof)
+
+```{r}
+
+t.test(user_rating ~ popularity_group,
+       data = ratings_with_popularity)
+
+t_test_res <- t.test(
+  user_rating ~ popularity_group,
+  data = ratings_with_popularity
+)
+
+library(broom)
+
+tidy(t_test_res) %>%
+  mutate(
+    estimate_diff = estimate1 - estimate2
+  ) %>%
+  select(
+    statistic, p.value, conf.low, conf.high,
+    estimate1, estimate2, estimate_diff
+  ) %>%
+  kable(
+    digits = 3,
+    col.names = c(
+      "t statistic", "p-value",
+      "CI (low)", "CI (high)",
+      "Mean (Popular)", "Mean (Unpopular)",
+      "Mean difference"
+    ),
+    caption = "Welch two-sample t-test comparing user ratings by popularity group"
+  ) %>%
+  kable_styling(
+    bootstrap_options = c("striped", "condensed"),
+    full_width = FALSE
+  )
+
+
+
+```
+
+We performed a simple t-test given we are comparing two categorical variables. Popularity_group is a binary variable with two categories: popular and unpopular. And rating is an ordinal categorical variable with six categories ranging from 1= Extremely similar to 6= extremely different.
+
+A Welch two-sample t-test indicates that mean user ratings differ significantly between popular (M = 3.95) and unpopular items (M = 3.89), t(17,292) = 4.86, p \< .001, 95% CI \[0.04, 0.09\]. Although this test points to high statistical difference, the effect size is quite small (0.064). The statistical significance of this difference is most likely due to our large sample size.
+
+Moreover, this difference in means goes in the opposite direction of our prediction. We hypothesized that popular universes would have *lower* ratings on average compared to unpopular universes. It seems that popularity has little effect on participants' ratings, and this effect comes from less known shows.
+
+### Hypothesis 2: Unpopular shows' ratings are positively affected by year
+
+Having established the negative relationship between popularity and similarity, we haven't explored the potential temporal aspect of this survey's results.
+
+Particularly, unpopular shows may, overtime, garner more appreciation which could lead to even better similarity ratings. Highly popular shows like Harry potter or Game of thrones are quite old and might be surpassed by recently airing shows that are more salient culturally.
+
+We hypothesize that, given that unpopular shows are already preferred rating wise, ratings will only get better as time goes compared to popular shows.
+
+##### How many participants took the survey throughout the years:
+
+Let's visualize the distribution participants by year
+
+```{r}
+#Renaming the variable year as survey_year: 
+data_sample_tidy <- data_sample_tidy %>%
+  rename (survey_year = year) #renaming variable as survey_year
+
+
+#Barchart to visualise distribution of participants across years. 
+
+data_sample_tidy %>%
+  count(survey_year) %>%
+  ggplot(aes(x = factor(survey_year), y = n)) +
+  geom_bar(stat = "identity") +
+  labs(
+    title = "Number of participants by survey year",
+    x = "Survey year",
+    y = "Number of participants"
+  ) +
+  theme_minimal()
+
+
+```
+
+Survey taking years range from 2020 to 2022, meaning three years. The number of participants decreased as time went by, by 50 000. 2020 had almost 80 000 participants, compared to 50 000 in 2021 and 30 000 in 2022.
+
+##### Progression of ratings for all universes throughout these three years
+
+```{r}
+#First computing the average user_rating by year: 
+avg_rating_year <- data_sample_tidy %>%
+  group_by(survey_year) %>% #grouping each year by its average rating
+  summarise(
+    mean_rating = mean(user_rating, na.rm = TRUE),
+    n = n()
+  )
+#Now plotting this progression: 
+ggplot(avg_rating_year, aes(x = factor(survey_year), y = mean_rating)) +
+  geom_point(size = 4) + #for clarity, we opt for points 
+  geom_text(
+    aes(label = round(mean_rating, 3)),
+    vjust = -1,
+    size = 4
+  ) +
+  labs(
+    title = "Average similarity rating by survey year",
+    x = "Survey year",
+    y = "Average similarity rating"
+  ) +
+  ylim(3.85, 4.00) +
+  theme_minimal()
+
+```
+
+This plot shows the average rating all universes got over the years, independent of their popularity category.
+
+All average ratings for the three years of survey taking are around 4 (4="slightly different"). The average ratings from 2020 to 2021 went down 0.04, and then went back up again by 0.04 in 2022. This indicates that overall, participants in 2021 were slightly more satisfied with their character matching compared to the previous and next year. Lets now see this progression factoring in popularity of universes.
+
+##### Change in rating over the years, by popularity:
+
+```{r}
+#new dataframe, showing each participant and year of taking survey
+user_year <- data_sample_tidy %>%
+  select(user_id, survey_year) %>%
+  distinct(user_id, .keep_all = TRUE)
+
+#Now merging dataframe created earlier showing universes and rating and their category  
+ratings_with_popularity <- ratings_with_popularity %>%
+  left_join(user_year, by = "user_id")
+
+
+#Now we can see for each year, we see mean rating of all popular vs unpopular universes 
+avg_rating_year_pop <- ratings_with_popularity %>%
+  group_by(survey_year, popularity_group) %>%
+  summarise(
+    mean_rating = mean(user_rating, na.rm = TRUE),
+    n_participant = n(),
+    .groups = "drop"
+  )
+#putting this info in a table 
+avg_rating_year_pop %>%
+  mutate(
+    mean_rating = round(mean_rating, 2)
+  ) %>%
+  kable(
+    col.names = c(
+      "Survey year",
+      "Universe popularity",
+      "Mean rating",
+      "Number of participants"
+    ),
+    caption = "Mean similarity ratings by universe popularity and survey year"
+  ) %>%
+  kable_styling(
+    bootstrap_options = c("striped", "condensed"),
+    full_width = FALSE
+  )
+
+
+
+```
+
+The ratings across both years and popularity fluctuate moderately. The lowest rating is also the most recent, M=3.80 ; Y= 2022 for unpopular universes. The highest is recorded in the same year, 2022 at 3.97 for popular universes. Plotting these observations will help better visualize universes' rating progression throughout the years.
+
+```{r}
+#Visualising these fluctuations 
+ggplot(
+  avg_rating_year_pop,
+  aes(
+    x = factor(survey_year),
+    y = mean_rating,
+    color = popularity_group,
+    group = popularity_group
+  )
+) +
+  geom_point(size = 3) +
+  geom_line() +
+  geom_text(
+    aes(label = round(mean_rating, 3)),
+    vjust = -1,
+    size = 3,
+    show.legend = FALSE
+  ) +
+  labs(
+    title = "Average similarity rating by survey year, by universe popularity",
+    x = "Survey year",
+    y = "Average similarity rating",
+    color = "Universe popularity"
+  ) +
+  theme_minimal()
+```
+
+This plot shows a clear divergence in ratings by popularity. Through the years, popular shows' ratings do not fluctuate significantly compared to unpopular shows. From 2020 to 2022, popular shows increase in rating, meaning that participants feel less similar to characters of these shows overtime. Conversely, unpopular shows show a consistent decrease in ratings by 0.15 over the three years of survey taking.
+
+This pattern suggests that less popular universes may gain identificatory potential over time as they become more familiar to participants.
+
+To understand more thoroughly the potential relationship between these three variables (ratings, year and popularity), and to also make sure this increase in similarity perception in unpopular universes is not due to less participants taking the survey through 2021 and 2022, we will perform an ANOVA.
+
+#### General Linear Model
+
+In this model, our outcome variable (X) is the rating given by participants (numeric, roughly continuous). Our predictors are popularity, which is a categorical variable (pop vs unpop universe) and survey_year (numeric and continuous).
+
+This model would help us describe the rating a participant would give depending on the year in which they are taking the survey, and whether the character they are rating is in a popular or unpopular show.
+
+```{r}
+#First we will need to center the year variable so the model doesnt give us counterintuitive intercept and estimates.
+ratings_with_popularity <- ratings_with_popularity %>%
+  mutate(survey_year_c = survey_year - 2020)
+
+#Linear model modeling rating by popularity and year.
+model_linear_year_c <- glm(
+  user_rating ~ popularity_group * survey_year_c,
+  data = ratings_with_popularity,
+  family = gaussian()
+)
+
+summary(model_linear_year_c)
+```
+
+The regression analysis shows no statistically significant baseline difference in similarity ratings between popular and unpopular universes in the reference year 2020 (p = 0.74). Likewise, there is no evidence of a general time trend in ratings for popular universes, as the main effect of survey year is effectively zero and not statistically significant (p = 0.997). In contrast, the interaction between survey year and universe popularity is statistically significant (p \< 0.001), indicating that similarity ratings for unpopular universes decrease slightly more over time than those for popular universes. Although the magnitude of this interaction effect is small, it suggests a modest divergence in rating trajectories: perceived similarity with characters from unpopular universes increases over time relative to popular universes, even in the absence of overall time effects or baseline popularity differences.
+
+```{r}
+summary(lm(user_rating ~ popularity_group * survey_year_c,
+           data = ratings_with_popularity))$r.squared
+```
+
+```{r}
+anova(model_linear_year_c, type=2)
+```
