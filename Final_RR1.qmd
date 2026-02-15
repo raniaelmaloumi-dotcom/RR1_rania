@@ -25,7 +25,7 @@ The survey unfolds in three main stages.
 
 ![](images/clipboard-947655878.png)
 
-The answers to these questions are encrypted into the variable quiz_items.
+The answers to these questions are encrypted into the variable quiz_items. There are 36 questions per participant.
 
 -   **Universe selection and matching:** Then, participants are given a list of fictional universes (shows and movies) to select from.
 
@@ -39,21 +39,21 @@ There are many other variables of interest in this data set, however for this re
 
 ## Research Question:
 
-This Quiz is inspired by and highly resembles Buzzfeed quizzes. To gain traction and elicit positive responses from users, these quizzes rely heavily on popular franchises that ignite nostalgic feelings, like harry potter, the marvel universe and other widely known shows.
+This Quiz is inspired by and highly resembles Buzzfeed quizzes. To gain traction and elicit positive responses from users, these quizzes rely heavily on popular franchises that ignite nostalgic feelings, like Harry Potter, the Marvel Universe and other widely known shows.
 
 In this report, we want to put to the test whether users objectively feel similar to characters from the shows they selected, or whether they are led to appreciate a similarity rating because of the popularity of a show.
 
-Highly popular fictional universes tend to be more culturally salient, widely referenced, and familiar to participants. This greater exposure may foster positive associations and stronger memory traces. As a result, being matched with a character from a popular universe may be perceived as more similar.
+Highly popular fictional universes tend to be more culturally salient, widely referenced, and familiar to participants. This greater exposure may foster positive associations and stronger memory traces. As a result, it is possible that participants assign a better rating score just because they *want* to be similar to a character from a [famous]{.underline} show.
 
 In contrast, less popular or more niche universes, while they can still elicit emotional attachment for some participants, are generally less culturally present and may therefore generate weaker ratings.
 
 **How does this translate in our data?**
 
-As we've mentioned before, our three variables of interest are universe_selected (which shows participants selected most and least), survey_ratings (how similar participants feel to their result character) and year (the year in which participants took the test, this variable will become relevant a little later into the analysis).
+As we've mentioned before, our three variables of interest are *universe_selected* (which shows participants selected most and least), *survey_ratings* (how similar participants feel to their result character) and *year* (the year in which participants took the test, this variable will become relevant a little later into the analysis).
 
 **Hypothesis 1:**
 
-We predict that on average, universes that are "popular" (selected more often than others) will benefit from better similarity ratings (ratings closer to 1 for maximum similarity, opposed to 6).
+We predict that on average, universes that are "popular" (selected more often than others) will benefit from better similarity ratings (ratings closer to 1 for maximum similarity, as opposed to 6).
 
 ## Tidying the data:
 
@@ -68,6 +68,9 @@ library(jsonlite)
 library(purrr)
 library(kableExtra)
 library(knitr)
+library(car)
+library(broom)
+library(modelsummary)
 data <- read_delim("SWCPQ-Identification-Survey-Dataset-July2022.csv")
 
 ```
@@ -140,9 +143,9 @@ data_clean <- data %>%
 
 ```
 
-Our new dataset contains 12 variables instead of 19.
+Our new dataset contains 13 variables instead of 19.
 
-Here we will focus on the nested variable survey_ratings in order to simplify analysis. The variable survey_ratings has 3 pieces of information (volumes) in one cell:
+Here we will focus on the nested variable *survey_ratings* in order to simplify analysis. The variable survey_ratings has 3 pieces of information (volumes) in one cell:
 
 1.  *character ID:* the character participants were matched with after responding
 
@@ -183,7 +186,8 @@ Here we will focus on the nested variable survey_ratings in order to simplify an
       select(-survey_ratings)
 
     #Now the section survey_ratings is transformed into three distinct variables each analysable independently. 
-    summary(data_sample_tidy$user_rating) #measures of central tendency 
+
+    # Measures of central tendency 
     kable(t(summary(data_sample_tidy$user_rating)),
           caption = "Measures of central tendency: survey ratings") %>%
       kable_styling(full_width = FALSE)
@@ -199,7 +203,7 @@ Having organised the major part of the data set of interest, we can now proceed 
 
 ##### Which universes do participants select the most ?
 
-The variable universe_selected represents the list of fictional universes participants chose. Characters of these selected universes alone are matched with participants.
+The variable *universe_selected* represents the list of fictional universes participants chose. Characters of these selected universes alone are matched with participants. This variable is also comprised of lists of universes per participant. To simplify visualization, we'll separate these lists into individual rows.
 
 ```{r}
 #Universe_selected has multiple universes per row, lets split them:
@@ -335,15 +339,10 @@ Indeed, as shown in this plot, popularity does not seem to be significantly asso
 
 ```{r}
 
-t.test(user_rating ~ popularity_group,
-       data = ratings_with_popularity)
-
 t_test_res <- t.test(
   user_rating ~ popularity_group,
   data = ratings_with_popularity
 )
-
-library(broom)
 
 tidy(t_test_res) %>%
   mutate(
@@ -372,7 +371,7 @@ tidy(t_test_res) %>%
 
 ```
 
-We performed a simple t-test given we are comparing two categorical variables. Popularity_group is a binary variable with two categories: popular and unpopular. And rating is an ordinal categorical variable with six categories ranging from 1= Extremely similar to 6= extremely different.
+We performed a simple t-test given we are comparing two categorical variables. We use a t-test here to determine if there is a significant difference between the average (mean) ratings of popular and unpopular universes. Specifically, this test will show us if this difference is significant or due to random variation. Popularity_group is a binary variable with two categories: popular and unpopular. And rating is an ordinal categorical variable with six categories ranging from 1= Extremely similar to 6= extremely different.
 
 A Welch two-sample t-test indicates that mean user ratings differ significantly between popular (M = 3.95) and unpopular items (M = 3.89), t(17,292) = 4.86, p \< .001, 95% CI \[0.04, 0.09\]. Although this test points to high statistical difference, the effect size is quite small (0.064). The statistical significance of this difference is most likely due to our large sample size.
 
@@ -382,13 +381,15 @@ Moreover, this difference in means goes in the opposite direction of our predict
 
 Having established the negative relationship between popularity and similarity, we haven't explored the potential temporal aspect of this survey's results.
 
-Particularly, unpopular shows may, overtime, garner more appreciation which could lead to even better similarity ratings. Highly popular shows like Harry potter or Game of thrones are quite old and might be surpassed by recently airing shows that are more salient culturally.
+Particularly, unpopular shows may, overtime, garner more appreciation which could lead to even better similarity ratings. Highly popular shows like Harry potter or Game of thrones are quite old and might be surpassed by recently airing shows that are more salient culturally. New airing shows inhabit cultural discourse more intensely on the short term.
 
 We hypothesize that, given that unpopular shows are already preferred rating wise, ratings will only get better as time goes compared to popular shows.
 
+Translated to our variables' encryption, this means that ratings *for* *unpopular shows* will be lower as the variable year goes up.
+
 ##### How many participants took the survey throughout the years:
 
-Let's visualize the distribution participants by year
+Let's visualize the distribution of participants by year
 
 ```{r}
 #Renaming the variable year as survey_year: 
@@ -497,9 +498,9 @@ The ratings across both years and popularity fluctuate moderately. The lowest ra
 ggplot(
   avg_rating_year_pop,
   aes(
-    x = factor(survey_year),
-    y = mean_rating,
-    color = popularity_group,
+    x = factor(survey_year),#years on the x axis
+    y = mean_rating,#average ratings on the y axis
+    color = popularity_group,#two plotted lines per popularity grp, differing by color
     group = popularity_group
   )
 ) +
@@ -526,34 +527,140 @@ This pattern suggests that less popular universes may gain identificatory potent
 
 To understand more thoroughly the potential relationship between these three variables (ratings, year and popularity), and to also make sure this increase in similarity perception in unpopular universes is not due to less participants taking the survey through 2021 and 2022, we will perform an ANOVA.
 
-#### General Linear Model
+#### ANOVA: Verifying if there is an interaction between popularity and year
 
-In this model, our outcome variable (X) is the rating given by participants (numeric, roughly continuous). Our predictors are popularity, which is a categorical variable (pop vs unpop universe) and survey_year (numeric and continuous).
+We want to know if ratings are the product of an interaction between popularity and year.
 
-This model would help us describe the rating a participant would give depending on the year in which they are taking the survey, and whether the character they are rating is in a popular or unpopular show.
+Because user ratings are continuous and our predictors include both a categorical factor (popularity group) and a continuous variable (survey year), we first conduct a two-way ANOVA to assess whether mean ratings differ by popularity group and whether ratings *over time* vary across popularity groups. This allows us to test for statistically significant effects before looking at their direction (whether positive or negative).
+
+ANOVA is a special case of the linear model in which predictors are categorical; therefore, ANOVA and linear regression rely on the same underlying assumptions:
+
+**Normality of residuals:** The errors of our model should follow a normal distribution
+
+**Homoscedasticity:** Residual variance is constant across all levels of fitted values.
 
 ```{r}
 #First we will need to center the year variable so the model doesnt give us counterintuitive intercept and estimates.
 ratings_with_popularity <- ratings_with_popularity %>%
   mutate(survey_year_c = survey_year - 2020)
 
-#Linear model modeling rating by popularity and year.
-model_linear_year_c <- glm(
+#Second, we fit a linear model which assumes an interaction between year and popularity:
+model_year <- lm(
   user_rating ~ popularity_group * survey_year_c,
-  data = ratings_with_popularity,
-  family = gaussian()
+  data = ratings_with_popularity
+)
+#Conduct a two way ANOVA to assess the significance of this interaction, plotted in a table for clarity: 
+anova_tbl <- car::Anova(model_year, type = 2) %>% #this computs ANOVA results
+  broom::tidy() %>% # this is to make a clean table
+  mutate(
+    p.value = format.pval(p.value, digits = 3, eps = .001),
+    statistic = round(statistic, 2) #this rounds very small values to zero
+  ) %>%
+  select(term, df, statistic, p.value) %>% #the values needed to interpret
+  rename(`Effect` = term, `Df` = df, `F` = statistic, `p` = p.value)
+
+anova_tbl %>% #here fitted into a pretty table
+  kbl(caption = "Type II ANOVA for user_rating") %>%
+  kable_styling(full_width = FALSE, bootstrap_options = c("striped", "hover"))
+
+```
+
+This two-way ANOVA test gives us insight on the effect of popularity on ratings, the effect of years on ratings, and the interaction between popularity and years.
+
+**Popularity_group:** There is a significant main effect of popularity, with a high F-ratio (F = 23.12), and low p-value (p \< .001). Meaning that the difference in means between popular and unpopular groups is indeed significant.
+
+**Survey_year:** Survey year has no significant effect on ratings, F= 1.58, p = .21. F-ration is low and high p-value lead to accepting the null hypothesis that inter and intra-group variation are equal.
+
+**Popularity_group:survey_year_c:** The interaction between popularity and survey year is statistically significant, F = 18.09, p \< .001, indicating that rating trends over time differ between popular and unpopular shows.
+
+Checking for the model's assumptions let's see the distribution of residuals:
+
+```{r}
+plot(model_year, which = 2)
+```
+
+Residuals following perfect randomization would align perfectly with the dotted diagonal line. Given that our outcome variable, ratings, can only take certain values (from one to six), it's expected we see a stair-case like shape as shown in the plot. Given our large sample size, although the residuals arent perfectly normal, we have sufficient normality for statistical inference (meaning our F-test and p-values) to remain valid. Again, our interpretations require caution.
+
+Checking for homoscedasticity:
+
+```{r}
+plot(model_year, which = 1)
+```
+
+If the outcome variable were perfectly continuous, we would expect the residuals to form a random cloud around the zero line. However, as discussed earlier, the rating variable can only take a limited set of discrete values, which explains the vertically stacked pattern observed in the plot. Importantly, the spread of residuals remains relatively constant across fitted values, indicating that the homoscedasticity assumption is reasonably satisfied.
+
+Having confirmed the *existence* of an effect, particularly an interaction between years and universe popularity, its time we build a regression table to know more about the direction of this interaction and its effect size.
+
+#### Regression table and regression line. 
+
+```{r}
+#We build a regression table showing first a linear model predicting ratings by popularity, a relationship we've analysed before in Hypothesis 1:
+m1 <- lm(
+  user_rating ~ popularity_group,
+  data = ratings_with_popularity
+)
+#Our second model introduces interaction with the variable survey_year: 
+m2 <- lm(
+  user_rating ~ popularity_group * survey_year_c,
+  data = ratings_with_popularity
+)
+#we list these two models in order to polt them in a regression table
+models <- list(
+  "Popularity only" = m1,
+  "Popularity × Year" = m2
 )
 
-summary(model_linear_year_c)
+#the modelsummary() function allows us to see all important statistical inference 
+modelsummary(
+  models,
+  output = "kableExtra",
+  statistic = "({std.error})",
+  stars = TRUE,
+  gof_map = c("nobs", "r.squared", "adj.r.squared", "aic", "bic"),
+  title = "Linear models predicting user ratings"
+) %>%
+  kable_styling(full_width = FALSE, bootstrap_options = c("striped", "hover"))
+
 ```
 
-The regression analysis shows no statistically significant baseline difference in similarity ratings between popular and unpopular universes in the reference year 2020 (p = 0.74). Likewise, there is no evidence of a general time trend in ratings for popular universes, as the main effect of survey year is effectively zero and not statistically significant (p = 0.997). In contrast, the interaction between survey year and universe popularity is statistically significant (p \< 0.001), indicating that similarity ratings for unpopular universes decrease slightly more over time than those for popular universes. Although the magnitude of this interaction effect is small, it suggests a modest divergence in rating trajectories: perceived similarity with characters from unpopular universes increases over time relative to popular universes, even in the absence of overall time effects or baseline popularity differences.
+**Model 1:**
+
+X = 𝛽0 + 𝛽1. Y
+
+In M1, the outcome variable is ratings (X) and the predictor is popularity group (Y).
+
+This model assumes a linear relationship between user ratings and popularity group. The intercept, which represents the average rating for shows in the reference category (here, popular), is estimated at 3.952 (p \< 0.001). The coefficient associated with the unpopular category is −0.064 (p \< 0.001), indicating that, on average, unpopular shows receive ratings that are 0.064 points lower than popular shows. This difference is statistically significant. However, the R² value (≈ 0) indicates that popularity alone explains a negligible share of the overall variation in user ratings, suggesting that while the effect is statistically detectable, it is substantively very small.
+
+**Model 2:**
+
+X=𝛽0 + 𝛽1. Y + 𝛽2. Z + 𝛽3 (Y\*Z)
+
+In M2, X is still ratings, but we introduce a new predictor (Z), survey_year, and the interaction between survey_year and popularity_group (Y\*Z).
+
+This model extends the previous specification by allowing the effect of popularity on ratings to vary over time. The intercept represents the expected rating for popular shows in the reference year (2020) and is estimated at 3.953 (p \< 0.001). The main effect of popularity group is no longer statistically significant, indicating that, in the reference year, average ratings for popular and unpopular shows do not meaningfully differ. The main effect of survey year is also close to zero and not statistically significant for popular shows. However, the interaction term between popularity group and survey year is negative and statistically significant (−0.078, p \< 0.001), indicating that ratings for unpopular shows decline over time relative to popular shows. As in Model 1, the R² value remains close to zero, suggesting that although the interaction effect is statistically significant, the model explains very little of the overall variation in user ratings.
+
+The model allowed to discover that the direction of the effect of interaction between years and popularity follows our hypothesis. Unpopular show benefit overtime from more positive ratings. However, given the r² of M2, no actual variation is explained by this interaction.
 
 ```{r}
-summary(lm(user_rating ~ popularity_group * survey_year_c,
-           data = ratings_with_popularity))$r.squared
+#Here we visualize our model in a dotted plot: 
+ggplot(ratings_with_popularity,
+       aes(x = survey_year_c,
+           y = user_rating,
+           color = popularity_group)) +
+  geom_point(alpha = 0.15) +
+  geom_smooth(method = "lm", se = FALSE) +#this introduces a smoth line showing model predictions for both popular and unpopular groups
+  labs(
+    x = "Survey year (centered)",
+    y = "User rating",
+    color = "Popularity group",
+    title = "User ratings over time by popularity group"
+  ) +
+  theme_minimal()
+
 ```
 
-```{r}
-anova(model_linear_year_c, type=2)
-```
+This dotted plot reinforces our previous interpretation, the model captures 0 variation. There is a negative slope for unpopular shows, but the flat fitted values don't at all follow model predictions.
+
+## Conclusion
+
+Overall, our hypotheses are not supported. Even though some effects are statistically significant, the models explain almost none of the variation in user ratings, suggesting that popularity and its interaction with time do not meaningfully shape how characters are rated. This may partly be due to data limitations: although the survey is still ongoing, we only observe ratings over three years, which makes it difficult to clearly identify any interaction between popularity and time. With more data, these dynamics might become more visible. In addition, including information on participants’ age could be an interesting extension, as people from different age groups may not only select different universes but also evaluate characters from older and newer shows in different ways.
